@@ -34,7 +34,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 # Import DeepSeek-OCR components
 from config import INPUT_PATH, OUTPUT_PATH, PROMPT, CROP_MODE, MAX_CONCURRENCY, NUM_WORKERS
-MODEL_PATH = os.environ.get('MODEL_PATH', 'deepseek-ai/DeepSeek-OCR')
+MODEL_ID =  'deepseek-ai/DeepSeek-OCR'
 from deepseek_ocr import DeepseekOCRForCausalLM
 from process.image_process import DeepseekOCRProcessor
 from vllm import LLM, SamplingParams
@@ -84,7 +84,7 @@ def initialize_model():
         
         # Initialize vLLM engine
         llm = LLM(
-            model=MODEL_PATH,
+            model=MODEL_ID,
             hf_overrides={"architectures": ["DeepseekOCRForCausalLM"]},
             block_size=256,
             enforce_eager=False,
@@ -196,7 +196,7 @@ async def health_check():
     return {
         "status": "healthy",
         "model_loaded": llm is not None,
-        "model_path": MODEL_PATH,
+        "model_path": MODEL_ID,
         "cuda_available": torch.cuda.is_available(),
         "cuda_device_count": torch.cuda.device_count() if torch.cuda.is_available() else 0
     }
