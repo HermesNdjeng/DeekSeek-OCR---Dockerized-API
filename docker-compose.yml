@@ -7,10 +7,8 @@ services:
     volumes:
       - ./models:/app/models  # Mount directory for model weights
       - ./outputs:/app/outputs  # Mount directory for output files
-    environment:
-      - CUDA_VISIBLE_DEVICES=0
-      - MAX_CONCURRENCY=5  # Adjust based on your GPU memory
-      - GPU_MEMORY_UTILIZATION=0.85  # Adjust based on your GPU memory
+    env_file:
+      - .env  # Load environment variables from .env file
     deploy:
       resources:
         reservations:

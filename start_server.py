@@ -13,9 +13,7 @@ from typing import List, Optional
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Form
-from typing import Optional
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Form, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import torch
@@ -42,6 +40,9 @@ from vllm.model_executor.models.registry import ModelRegistry
 
 # Register the custom model
 ModelRegistry.register_model("DeepseekOCRForCausalLM", DeepseekOCRForCausalLM)
+
+# Get API key from environment variable
+API_KEY = os.getenv("API_KEY", "default-api-key-change-me")
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -74,6 +75,11 @@ class BatchOCRResponse(BaseModel):
     results: List[OCRResponse]
     total_pages: int
     filename: str
+
+def require_api_key(request: Request):
+    api_key = request.headers.get("X-API-Key")
+    if not api_key or api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 def initialize_model():
     """Initialize the vLLM model"""
@@ -202,8 +208,11 @@ async def health_check():
     }
 
 @app.post("/ocr/image", response_model=OCRResponse)
-async def process_image_endpoint(file: UploadFile = File(...), prompt: Optional[str] = Form(None)):
-    """Process a single image file with optional custom prompt"""
+async def ocr_image(
+    file: UploadFile = File(...),
+    _: None = Depends(require_api_key)
+):
+    """Process a single image"""
     try:
         print(f"[DEBUG] Image endpoint called for file: {file.filename}")
         
@@ -243,7 +252,10 @@ async def process_image_endpoint(file: UploadFile = File(...), prompt: Optional[
         )
 
 @app.post("/ocr/pdf", response_model=BatchOCRResponse)
-async def process_pdf_endpoint(file: UploadFile = File(...), prompt: Optional[str] = Form(None)):
+async def ocr_pdf(
+    file: UploadFile = File(...),
+    _: None = Depends(require_api_key)
+):
     """Process a PDF file with optional custom prompt"""
     try:
         print(f"[DEBUG] PDF endpoint called for file: {file.filename}")
@@ -310,15 +322,18 @@ async def process_pdf_endpoint(file: UploadFile = File(...), prompt: Optional[st
         )
 
 @app.post("/ocr/batch")
-async def process_batch_endpoint(files: List[UploadFile] = File(...), prompt: Optional[str] = Form(None)):
-    """Process multiple files (images and PDFs) with optional custom prompt"""
+async def ocr_batch(
+    files: List[UploadFile] = File(...),
+    api_key: str = Depends(verify_api_key) if API_KEY else None
+):
+    """Batch process multiple files (images and PDFs)"""
     results = []
     
     for file in files:
         if file.filename.lower().endswith('.pdf'):
-            result = await process_pdf_endpoint(file, prompt)
+            result = await ocr_pdf(file, prompt)
         else:
-            result = await process_image_endpoint(file, prompt)
+            result = await ocr_image(file, prompt)
         
         results.append({
             "filename": file.filename,
