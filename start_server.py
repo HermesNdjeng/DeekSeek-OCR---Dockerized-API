@@ -10,11 +10,11 @@ import asyncio
 import io
 import tempfile
 from typing import List, Optional
-from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Form, Header, Depends, Request
+from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import torch
 import fitz  # PyMuPDF
@@ -31,7 +31,7 @@ os.environ['VLLM_USE_V1'] = '0'
 os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 # Import DeepSeek-OCR components
-from config import INPUT_PATH, OUTPUT_PATH, PROMPT, CROP_MODE, MAX_CONCURRENCY, NUM_WORKERS
+from config import PROMPT, CROP_MODE, MAX_CONCURRENCY
 MODEL_ID =  'deepseek-ai/DeepSeek-OCR'
 from deepseek_ocr import DeepseekOCRForCausalLM
 from process.image_process import DeepseekOCRProcessor
@@ -60,6 +60,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+_EXCLUDED_PATHS = {"/", "/health", "/docs", "/openapi.json", "/redoc"}
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    if request.url.path in _EXCLUDED_PATHS:
+        return await call_next(request)
+    api_key = request.headers.get("x-api-key")
+    if not api_key or api_key != API_KEY:
+        return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+    return await call_next(request)
+
 # Global variables for the model
 llm = None
 sampling_params = None
@@ -75,11 +86,6 @@ class BatchOCRResponse(BaseModel):
     results: List[OCRResponse]
     total_pages: int
     filename: str
-
-def require_api_key(request: Request):
-    api_key = request.headers.get("X-API-Key")
-    if not api_key or api_key != API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 def initialize_model():
     """Initialize the vLLM model"""
@@ -189,6 +195,10 @@ def process_single_image(image: Image.Image, prompt: str = PROMPT) -> str:
 @app.on_event("startup")
 async def startup_event():
     """Initialize the model on startup"""
+    if API_KEY == "default-api-key-change-me":
+        print("[WARNING] Using default API key - set API_KEY environment variable!")
+    else:
+        print("[INFO] API key configured from environment.")
     initialize_model()
 
 @app.get("/")
@@ -210,7 +220,7 @@ async def health_check():
 @app.post("/ocr/image", response_model=OCRResponse)
 async def ocr_image(
     file: UploadFile = File(...),
-    _: None = Depends(require_api_key)
+    prompt: Optional[str] = Form(None),
 ):
     """Process a single image"""
     try:
@@ -254,7 +264,7 @@ async def ocr_image(
 @app.post("/ocr/pdf", response_model=BatchOCRResponse)
 async def ocr_pdf(
     file: UploadFile = File(...),
-    _: None = Depends(require_api_key)
+    prompt: Optional[str] = Form(None),
 ):
     """Process a PDF file with optional custom prompt"""
     try:
@@ -324,7 +334,6 @@ async def ocr_pdf(
 @app.post("/ocr/batch")
 async def ocr_batch(
     files: List[UploadFile] = File(...),
-    api_key: str = Depends(verify_api_key) if API_KEY else None
 ):
     """Batch process multiple files (images and PDFs)"""
     results = []
