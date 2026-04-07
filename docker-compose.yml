@@ -36,3 +36,4 @@ services:
       - ./nginx/key.pem:/etc/nginx/conf.d/key.pem:ro
     depends_on:
       - deepseek-ocr
+    restart: unless-stopped
